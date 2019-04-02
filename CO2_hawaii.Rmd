@@ -1,0 +1,110 @@
+---
+title: "Devoir 5 : Séries temporelles et reproductibilité"
+author: "Véronique Rouleau"
+date: "05-04-2019"
+output: github_document
+---
+
+## 1. Créer une série temporelle du CO2 atmosphérique
+
+Les données du fichier *hawai.csv* comprennent les moyennes des mesures mensuelles de CO2 atmosphérique en ppm-volume collectées au [Mauna Loa Observatory à Hawaii](https://www.esrl.noaa.gov/gmd/obop/mlo/) de mars 1958 à juillet 2001, inclusivement.
+
+Afin de créer une série temporelle du CO2 à partir des données de *hawai.csv*, j'ai tout d'abord importé le fichier dans R Studio. La fonction `read_csv` a été utilisée car dans le fichier *hawai.csv*, le séparateur de colonne est une virgule et le séparateur décimal est un point.
+
+```{r}
+library(tidyverse)
+
+hawai <- read_csv(file = "hawai.csv")
+
+library("forecast")
+library("fpp2")
+```
+
+J'ai ensuite changé la date en format décimale (par exemple : 1958.167) à une date en format année/mois/jour heure/minute/seconde UTC (par exemple : 1958-03-02 20:00:01)
+
+```{r}
+library("lubridate")
+
+date <- date_decimal(hawai$time)
+```
+
+J'ai ensuite ajouté une colonne comprenant la date transformée et j'ai enlevé la colonne *"time"*.
+
+```{r}
+hawai_date <- hawai %>% mutate(Date = date) %>% select(-time)
+```
+
+J'ai ensuite créé une série temporelle de type `ts`.
+
+```{r}
+hawai_ts <- ts(hawai_date %>% select(-Date), 
+               start = c(hawai_date$Date[1] %>% year(), 1),
+               frequency = 12)
+```
+
+Visualisation de la série temporelle avec `autoplot()` :
+
+```{r hawai_ts, echo=FALSE}
+autoplot(hawai_ts)
+```
+
+## 2. Séparer la série en parties d'entraînement (environ 70% des données) et en partie test avec la méthode SES
+
+La partie d'entraînement (`hawai_ts_train`) comprend environ 70% des données, ce qui représente environ les 373 premières entrées (de 1958-03-02 à 1988-12-01). La partie test (`hawai_ts_test`) comprend donc les 154 dernières entrées (de 1989-01-01 à 2001-12-01).
+
+```{r}
+hawai_ts_train <- window(hawai_ts, start = 1958, end = 1988.999)
+
+hawai_ts_test <- window(hawai_ts, start = 1989)
+```
+
+## 3. Créer un modèle **ETS** sur les données d'entraînement, puis projeter la prévision de CO2 atmosphérique pour comparer aux données test
+
+J'ai tout d'abord généré un modèle ETS (*error, tend and seasonnal*).
+
+```{r}
+hawai_model <- ets(hawai_ts_train)
+```
+
+Visualisation de l'évolution des différentes composantes :
+
+```{r hawai_model, echo=FALSE}
+autoplot(hawai_model)
+```
+
+J'ai ensuite généré une prédiction : 
+
+```{r}
+hawai_ets <- hawai_ts_train %>% ets()
+hawai_fc <- hawai_ets %>% forecast()
+```
+```{r hawai_fc, echo=FALSE}
+hawai_fc %>% autoplot()
+```
+
+Analyse d'exactitude effectuée sur la prévision :
+
+```{r}
+accuracy(hawai_fc, hawai_ts)
+```
+
+## 4. Effectuer une analyse des résidus
+
+Analyse des résidus effectuée sur le modèle :
+
+```{r}
+checkresiduals(hawai_ets)
+```
+
+### Commentez : Le modèle est-il fiable? Comment pourrait-il être amélioré?
+
+Le modèle retenu est un ETS(A,A,A) ; nous avons une erreur type A (additive), une tendance de type A (additive) et une saisons de type A (additive).
+
+L'analyse des seuils (95%) de significtion de l'autocorrélation indique sur la possibilité de conduire la série temporelle vers un processus de modélisation. Ici, il est possible d'observer sur le graphique d'autocorrélation qu'il existe des corrélations significatives, mais que les données situées près les unes des autres pourraient être plus difficiles à modéliser.
+
+Les résidus contiennet de l'autocorrélation (ce qui devrait être évité) : il existe une structure dans les données qui n'a pas été capturée par le modèle.
+
+Le test de Ljung-Box indique que la probabilité que ces données soient générées selon un bruit blanc est inférieure à 0.0001% (p< 2.2e-16). En d'autres mots, la probabilité que la série soit un bruit blanc est presque nulle.La série temporelle est conséquemment différente du hasard, d'une série où il n'y a pas de structure.
+
+Enfin, les résidus semblent distribués normalement.Le graphique de la distribution des résidus montre toutefois des valeurs aberrantes.
+
